@@ -31,6 +31,7 @@ SAP2000 OAPI.
 - [Testing](#testing)
 - [Project structure](#project-structure)
 - [Version metadata](#version-metadata)
+- [Releasing](#releasing)
 - [Limitations](#limitations)
 
 ## Key features
@@ -52,6 +53,7 @@ SAP2000 OAPI.
 - Light and dark themes, including Windows title-bar theming.
 - Manual update check against GitHub Releases. No background checks and no
   automatic installation.
+- Automated GitHub release creation when a version tag is pushed.
 
 ## Requirements
 
@@ -405,6 +407,9 @@ ordering, preview, theme, and update-check behavior.
 ## Project structure
 
 ```text
+.github/
+  workflows/
+    release.yml    # tag-triggered release automation
 joint_axes/
   assets/          # app.ico and tiger.png
   __init__.py      # package version
@@ -437,6 +442,47 @@ sync when preparing a release:
 - `joint_axes/__init__.py` — package `__version__`;
 - `pyproject.toml` — package version;
 - `build_assets/version_info.txt` — Windows executable metadata.
+
+## Releasing
+
+Releases are created automatically by the workflow in
+`.github/workflows/release.yml`. The workflow runs when a tag matching `v*` is
+pushed.
+
+Before tagging, update every version file listed in
+[Version metadata](#version-metadata). The workflow checks that the tag matches
+`joint_axes/meta.py`, `joint_axes/__init__.py`, `pyproject.toml`, and the
+Windows version resource. A mismatch stops the release.
+
+Release steps:
+
+1. Update the version metadata and commit the change.
+2. Create an annotated tag:
+
+   ```powershell
+   git tag -a v0.3.2 -m "SAP2000 Joint Axes v0.3.2"
+   ```
+
+3. Push the commit and the tag:
+
+   ```powershell
+   git push origin main
+   git push origin v0.3.2
+   ```
+
+The workflow then:
+
+- installs the build dependencies;
+- verifies the tag against all version metadata;
+- runs the test suite and Ruff;
+- builds `SAP2000JointAxes.exe` with PyInstaller;
+- generates a SHA-256 checksum;
+- creates a GitHub Release titled `SAP2000 Joint Axes vX.Y.Z`;
+- uploads the executable and checksum as release assets;
+- generates release notes from the commit history.
+
+If a release for the same tag already exists, the workflow uploads the assets
+again and overwrites them.
 
 ## Limitations
 
