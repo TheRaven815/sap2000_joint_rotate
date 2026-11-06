@@ -457,17 +457,17 @@ Windows version resource. A mismatch stops the release.
 Release steps:
 
 1. Update the version metadata and commit the change.
-2. Create an annotated tag:
+2. Create a lightweight tag:
 
    ```powershell
-   git tag -a v0.3.2 -m "SAP2000 Joint Axes v0.3.2"
+   git tag v0.3.1
    ```
 
 3. Push the commit and the tag:
 
    ```powershell
    git push origin main
-   git push origin v0.3.2
+   git push origin v0.3.1
    ```
 
 The workflow then:
