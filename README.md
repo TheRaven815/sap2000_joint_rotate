@@ -18,6 +18,7 @@ SAP2000 OAPI.
 ## Contents
 
 - [Key features](#key-features)
+- [Screenshots](#screenshots)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Running from source](#running-from-source)
@@ -54,6 +55,24 @@ SAP2000 OAPI.
 - Manual update check against GitHub Releases. No background checks and no
   automatic installation.
 - Automated GitHub release creation when a version tag is pushed.
+
+## Screenshots
+
+All screenshots use demo data and do not require SAP2000.
+
+![SAP2000 Joint Axes promotional overview](docs/screenshots/promo-hero.png)
+
+| Light theme | Dark theme |
+|---|---|
+| ![Light theme](docs/screenshots/main-light.png) | ![Dark theme](docs/screenshots/main-dark.png) |
+
+| 3D preview | Result table |
+|---|---|
+| ![3D preview](docs/screenshots/preview-3d-light.png) | ![Result table](docs/screenshots/results-light.png) |
+
+![About window](docs/screenshots/about-light.png)
+
+Turkish promotional card: [promo-hero-tr.png](docs/screenshots/promo-hero-tr.png)
 
 ## Requirements
 
