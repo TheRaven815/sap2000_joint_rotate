@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import tkinter as tk
-from typing import Mapping
+from collections.abc import Mapping
 
 
 def _colorref(hex_color: str) -> int:
@@ -91,5 +91,5 @@ def apply_title_bar_theme(
                 ctypes.byref(color),
                 ctypes.sizeof(color),
             )
-    except Exception:  # noqa: BLE001 - eski Windows / DWM kapalı
+    except Exception:
         return

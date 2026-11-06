@@ -242,21 +242,21 @@ class SapConnection:
         if sap_object is None:
             try:
                 sap_object = comtypes_client.GetActiveObject(SAP_PROGID)
-            except Exception as exc:  # noqa: BLE001 - COM hataları çeşitlidir
+            except Exception as exc:
                 last_error = exc
 
         if sap_object is None:
             for helper_progid in HELPER_PROGIDS:
                 try:
                     helper = comtypes_client.CreateObject(helper_progid)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     last_error = exc
                     continue
                 for progid in SAP_OBJECT_PROGIDS:
                     try:
                         sap_object = helper.GetObject(progid)
                         break
-                    except Exception as exc:  # noqa: BLE001
+                    except Exception as exc:
                         last_error = exc
                 if sap_object is not None:
                     break
@@ -266,7 +266,7 @@ class SapConnection:
                 try:
                     sap_object = comtypes_client.GetActiveObject(progid)
                     break
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     last_error = exc
 
         if sap_object is None:
@@ -280,7 +280,7 @@ class SapConnection:
             model = sap_object.SapModel
             if callable(model):
                 model = model()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise SapConnectionError(
                 f"SAP2000 SapModel nesnesine erişilemedi: {exc}"
             ) from exc
@@ -301,7 +301,7 @@ class SapConnection:
     def _read_coordinates(self, name: str) -> tuple[float, float, float]:
         try:
             method = self.model.PointObj.GetCoordCartesian
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise SapApiError(f"PointObj.GetCoordCartesian erişilemedi: {exc}") from exc
 
         attempts: list[str] = []
@@ -310,7 +310,7 @@ class SapConnection:
         for mode in ("returns", "pointer", "byref", "plain", "values"):
             try:
                 ret, values = self._read_xyz_once(method, name, mode)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 attempts.append(f"{mode}: {exc}")
                 continue
 
@@ -374,7 +374,7 @@ class SapConnection:
 
         try:
             method = self.model.PointObj.GetNameList
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise SapApiError(f"PointObj.GetNameList erişilemedi: {exc}") from exc
 
         def no_args() -> list[Any]:
@@ -404,7 +404,7 @@ class SapConnection:
         for call in calls:
             try:
                 candidates = call()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_error = exc
                 continue
             for candidate in candidates:
@@ -425,7 +425,7 @@ class SapConnection:
 
         try:
             names, types = self._read_selection()
-        except Exception:  # noqa: BLE001 - alternatif yönteme geç
+        except Exception:
             return self._selected_with_point_flags()
 
         if types is not None and len(types) == len(names):
@@ -448,7 +448,7 @@ class SapConnection:
     def _read_selection(self) -> tuple[list[str], list[int] | None]:
         try:
             method = self.model.SelectObj.GetSelected
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise SapApiError(f"SelectObj.GetSelected erişilemedi: {exc}") from exc
 
         def no_args() -> list[Any]:
@@ -491,7 +491,7 @@ class SapConnection:
         for call in calls:
             try:
                 candidates = call()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_error = exc
                 continue
 
@@ -525,7 +525,7 @@ class SapConnection:
 
         try:
             method = self.model.PointObj.GetSelected
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise SapApiError(f"PointObj.GetSelected erişilemedi: {exc}") from exc
 
         selected: list[str] = []
@@ -533,7 +533,7 @@ class SapConnection:
         for name in names:
             try:
                 flag = _bool_from_result(method(name))
-            except Exception:  # noqa: BLE001 - tek joint hatası tüm seçimi bozmasın
+            except Exception:
                 continue
             if flag is None:
                 continue
@@ -556,7 +556,7 @@ class SapConnection:
 
         try:
             method = self.model.PointObj.SetLocalAxes
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise SapApiError(f"PointObj.SetLocalAxes erişilemedi: {exc}") from exc
 
         result = method(
@@ -576,7 +576,7 @@ class SapConnection:
 
         try:
             result = self.model.View.RefreshView(0, False)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise SapApiError(f"SAP2000 görünümü yenilenemedi: {exc}") from exc
 
         code = _result_code(result)

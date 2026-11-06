@@ -114,12 +114,12 @@ def _enable_dpi_awareness() -> None:
         import ctypes
 
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:  # noqa: BLE001 - eski Windows sürümleri
+    except Exception:
         try:
             import ctypes
 
             ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
 
@@ -722,9 +722,9 @@ class JointAxesWindow(ttk.Frame):
             if names:
                 try:
                     self._store_catalog(self.service.get_joint_names())
-                except Exception:  # noqa: BLE001 - öneri listesi isteğe bağlı
+                except Exception:
                     pass
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             messagebox.showerror("Seçim okunamadı", str(exc), parent=self)
             return
         finally:
@@ -752,7 +752,7 @@ class JointAxesWindow(ttk.Frame):
         self._set_busy(True)
         try:
             names = self.service.get_joint_names()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             messagebox.showerror("Joint listesi okunamadı", str(exc), parent=self)
             return
         finally:
@@ -794,7 +794,7 @@ class JointAxesWindow(ttk.Frame):
     def _ensure_catalog(self) -> None:
         try:
             names = self.service.get_joint_names()
-        except Exception:  # noqa: BLE001 - öneriler sessizce devre dışı
+        except Exception:
             self._catalog_loaded = True
             return
         self._store_catalog(names)
@@ -976,7 +976,7 @@ class JointAxesWindow(ttk.Frame):
                 self.joint_names,
                 preferred_start=preferred_start,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             messagebox.showerror("Sıralama hatası", str(exc), parent=self)
             return
         finally:
@@ -1413,9 +1413,9 @@ class JointAxesWindow(ttk.Frame):
             self.service.test_connection()
             try:
                 self._store_catalog(self.service.get_joint_names())
-            except Exception:  # noqa: BLE001 - bağlantı yine de geçerli
+            except Exception:
                 pass
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self.conn_var.set("SAP2000 · bağlantı yok")
             messagebox.showerror("SAP2000 bağlantı hatası", str(exc), parent=self)
         else:
@@ -1450,7 +1450,7 @@ class JointAxesWindow(ttk.Frame):
         self._set_busy(True)
         try:
             plan = self._calculate_plan()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self.plan = None
             self._clear_tree()
             self.count_var.set("0 joint")
@@ -1491,7 +1491,7 @@ class JointAxesWindow(ttk.Frame):
                 self.status_var.set("Uygulama kullanıcı tarafından iptal edildi.")
                 return
             report = self.service.apply(plan)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self.plan = None
             self._clear_tree()
             self.count_var.set("0 joint")
@@ -1618,7 +1618,7 @@ class JointAxesWindow(ttk.Frame):
 def _run_self_test() -> None:
     """Paketlenmiş exe içinde comtypes ve ikon varlığını doğrular."""
 
-    import comtypes.client  # noqa: F401
+    import comtypes.client  # noqa: F401 - PyInstaller'ın paketlemesi için
 
     from .sap import SapConnection
     from .service import JointAxesService

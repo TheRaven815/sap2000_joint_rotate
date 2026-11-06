@@ -6,8 +6,9 @@ import json
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from .meta import APP_NAME, APP_VERSION_NUMBER, PROJECT_URL, RELEASES_URL
 

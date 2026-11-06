@@ -217,7 +217,7 @@ class InfoWindow(tk.Toplevel):
             result = check_for_updates()
         except UpdateCheckError as exc:
             self._update_queue.put(("error", str(exc)))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._update_queue.put(("error", f"Beklenmeyen hata: {exc}"))
         else:
             self._update_queue.put(("ok", result))

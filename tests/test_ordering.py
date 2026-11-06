@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 
 import pytest
@@ -27,7 +28,7 @@ def test_orders_arc_points_along_curve() -> None:
     ordered = order_points_along_curve(_arc())
 
     angles = [math.degrees(math.atan2(point.y, point.x)) for point in ordered]
-    steps = [second - first for first, second in zip(angles, angles[1:])]
+    steps = [second - first for first, second in itertools.pairwise(angles)]
     assert all(step > 0 for step in steps) or all(step < 0 for step in steps)
     assert {point.name for point in ordered} == {str(index) for index in range(17)}
 

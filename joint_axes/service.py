@@ -72,7 +72,7 @@ class JointAxesService:
                 self.connection.set_local_axes(
                     result.joint.name, angle_a, angle_b, angle_c
                 )
-            except Exception as exc:  # noqa: BLE001 - her joint ayrı raporlanır
+            except Exception as exc:
                 failed.append((result.joint.name, str(exc)))
             else:
                 applied.append(result.joint.name)
@@ -81,7 +81,7 @@ class JointAxesService:
         if applied or failed:
             try:
                 self.connection.refresh_view()
-            except Exception as exc:  # noqa: BLE001 - atama başarısı korunur
+            except Exception as exc:
                 refresh_warning = str(exc)
 
         return ApplyReport(
@@ -124,5 +124,5 @@ class JointAxesService:
     def test_connection(self) -> None:
         try:
             self.connection.connect()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise SapApiError(str(exc)) from exc
