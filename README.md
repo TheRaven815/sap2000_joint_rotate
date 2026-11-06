@@ -62,17 +62,31 @@ All screenshots use demo data and do not require SAP2000.
 
 ![SAP2000 Joint Axes promotional overview](docs/screenshots/promo-hero.png)
 
+### Main window
+
 | Light theme | Dark theme |
 |---|---|
 | ![Light theme](docs/screenshots/main-light.png) | ![Dark theme](docs/screenshots/main-dark.png) |
 
-| 3D preview | Result table |
+### 3D preview
+
+| Light theme | Dark theme |
 |---|---|
-| ![3D preview](docs/screenshots/preview-3d-light.png) | ![Result table](docs/screenshots/results-light.png) |
+| ![3D preview light](docs/screenshots/preview-3d-light.png) | ![3D preview dark](docs/screenshots/preview-3d-dark.png) |
+
+### Results and joint sequence
+
+| Result table | Joint sequence |
+|---|---|
+| ![Result table](docs/screenshots/results-light.png) | ![Joint sequence](docs/screenshots/joint-sequence-light.png) |
+
+### About
 
 ![About window](docs/screenshots/about-light.png)
 
-Turkish promotional card: [promo-hero-tr.png](docs/screenshots/promo-hero-tr.png)
+Turkish promotional card:
+
+![Türkçe tanıtım kartı](docs/screenshots/promo-hero-tr.png)
 
 ## Requirements
 
