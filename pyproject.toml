@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sap2000-joint-axes"
+version = "0.3.1"
+description = "SAP2000 2B eğri/sürekli hat joint local axes hizalama aracı"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "comtypes>=1.2; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+sap2000-joint-axes = "joint_axes.ui:main"
+
+[tool.setuptools.packages.find]
+include = ["joint_axes*"]
+
+[tool.setuptools.package-data]
+joint_axes = ["assets/*.ico", "assets/*.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
