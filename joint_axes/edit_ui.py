@@ -93,6 +93,16 @@ class EditTab(ttk.Frame):
         ).pack(side="left")
         ttk.Button(footer, text="SAP2000'de etkinleştir", style="Tool.TButton",
                    command=lambda: self._run(self._activate_in_sap)).pack(side="right", padx=(6, 0))
+        ttk.Button(footer, text="Bağlantı tanısı", style="Tool.TButton",
+                   command=lambda: self._run(self._diagnose)).pack(side="right")
+
+    def _diagnose(self) -> None:
+        report = self.sap.diagnostics()
+        self.status.set("Bağlantı tanısı tamamlandı; model değiştirilmedi.")
+        if messagebox.askyesno("SAP2000 bağlantı tanısı", report, parent=self,
+                               detail="Tanı metni panoya kopyalansın mı?"):
+            self.clipboard_clear()
+            self.clipboard_append(report)
 
     def _build_operations(self) -> None:
         self.operations = ttk.Notebook(self)

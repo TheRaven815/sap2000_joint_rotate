@@ -53,6 +53,10 @@ def test_sap_euler_angles_rebuild_original_matrix_at_regular_and_singular_angles
     rebuilt = rotated(*system.sap_rotations())
     for actual, expected in zip(rebuilt.matrix, system.matrix, strict=True):
         assert actual == pytest.approx(expected, abs=1e-12)
+    from_cs_angles = CoordinateSystem.from_sap_rotations((10, 20, 30), *angles)
+    for actual, expected in zip(from_cs_angles.matrix, system.matrix, strict=True):
+        assert actual == pytest.approx(expected, abs=1e-12)
+    assert from_cs_angles.origin == (10, 20, 30)
 
 
 @pytest.mark.parametrize("count", [0, -1, True, 2.5, 2**31])
@@ -79,3 +83,16 @@ def test_degenerate_line_and_plane_are_rejected():
 def test_left_handed_matrix_cannot_be_used():
     with pytest.raises(InputValidationError, match="sağ el"):
         CoordinateSystem.from_sap((0, 0, 0), (0, 1, 0, 1, 0, 0, 0, 0, 1))
+
+
+@pytest.mark.parametrize(("end", "angle", "axis2", "axis3"), [
+    ((3, 0, 0), 0, (0, 0, 1), (0, -1, 0)),
+    ((0, 0, 3), 90, (0, 1, 0), (-1, 0, 0)),
+    ((0, 0, -3), 90, (0, -1, 0), (-1, 0, 0)),
+    ((3, 0, 4), 0, (-0.8, 0, 0.6), (0, -1, 0)),
+])
+def test_straight_frame_matches_csi_direction_and_roll(end, angle, axis2, axis3):
+    system = CoordinateSystem.from_straight_frame((0, 0, 0), end, angle)
+    assert system.global_vector((1, 0, 0)) == pytest.approx(tuple(v / math.hypot(*end) for v in end))
+    assert system.global_vector((0, 1, 0)) == pytest.approx(axis2)
+    assert system.global_vector((0, 0, 1)) == pytest.approx(axis3)

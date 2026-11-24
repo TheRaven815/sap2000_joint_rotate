@@ -3,11 +3,12 @@ from types import SimpleNamespace
 import pytest
 
 from joint_axes.errors import InputValidationError, SapApiError
-from joint_axes.sap import SapConnection, is_disconnected
+from joint_axes.sap import SapConnection, is_array_locked, is_disconnected
 from joint_axes.sap_edits import SapEdits, WorkingUcs
 from joint_axes.transform import mirror, radial, translation
 
 MATRIX = (0, 0, 1, 1, 0, 0, 0, 1, 0)
+ROTATIONS = (90.0, 90.0, 0.0)
 
 
 class DemoModel:
@@ -21,7 +22,7 @@ class DemoModel:
         self.edit_status = 0
         self.system_status = {}
         self.frame_joints = {"F1": "J1"}
-        self.systems = {"OTHER": ((10.0, 20.0, 30.0), MATRIX), "SLOPE": ((20.0, 30.0, 40.0), MATRIX)}
+        self.systems = {"OTHER": ((10.0, 20.0, 30.0), ROTATIONS), "SLOPE": ((20.0, 30.0, 40.0), ROTATIONS)}
         self.EditGeneral = SimpleNamespace(Move=self._move)
         for name in ("ReplicateLinear", "ReplicateRadial", "ReplicateMirror"):
             setattr(self.EditGeneral, name, self._replicator(name))
@@ -35,7 +36,7 @@ class DemoModel:
         self.CoordSys = SimpleNamespace(
             GetNameList=lambda *args: pytest.fail("UCS list must come from the display table"),
             GetCoordSys=self._get_coordinate_system,
-            GetTransformationMatrix=self._get_coordinate_matrix,
+            GetTransformationMatrix=lambda *args: pytest.fail("Named UCS uses scalar rotations"),
             SetCoordSys=self._create_system,
         )
         self.View = SimpleNamespace(RefreshView=self._refresh)
@@ -58,14 +59,12 @@ class DemoModel:
 
     def _get_coordinate_system(self, name, *values):
         assert values == (0.0,) * 6
-        return *self.systems[name][0], 0.0, 0.0, 0.0, 0
-
-    def _get_coordinate_matrix(self, name, values):
-        assert values == (0.0,) * 9
-        return self.systems[name][1], 0
+        origin, rotations = self.systems[name]
+        return *origin, *rotations, 0
 
     def _frame_matrix(self, name, values=None, IsGlobal=True):
-        assert values == (0.0,) * 9
+        if values is not None:
+            raise OSError(-2147352563, "Array is locked")
         assert IsGlobal is True
         assert name == "F1"
         return MATRIX, 0
@@ -91,7 +90,7 @@ class DemoModel:
 
     def _create_system(self, name, x, y, z, rz, ry, rx):
         self.events.append(("create", name, (x, y, z), (rz, ry, rx)))
-        self.systems[name] = ((x, y, z), MATRIX)
+        self.systems[name] = ((x, y, z), (rz, ry, rx))
         return 0
 
     def _move(self, *args):
@@ -113,6 +112,98 @@ class DemoModel:
 def sap():
     model = DemoModel()
     return SapEdits(SapConnection(model=model))
+
+
+class MissingDatabaseTables(DemoModel):
+    @property
+    def DatabaseTables(self):
+        raise OSError(-2147467262, "No such interface supported")
+
+    @DatabaseTables.setter
+    def DatabaseTables(self, _value):
+        pass
+
+
+def test_no_database_interface_uses_point_connectivity_not_get_points():
+    model = MissingDatabaseTables()
+    model.selected = [(1, "J2"), (2, "F1"), (1, "J1")]
+    origins = []
+
+    def connectivity(name, count, kinds, names, positions):
+        assert (count, kinds, names, positions) == (0, (0,), ("",), (0,))
+        return (1, (2,), ("F1",), (1 if name == "J1" else 2,), 0)
+
+    def coords(name):
+        origins.append(name)
+        return (5, 6, 7, 0)
+
+    model.PointObj.GetConnectivity = connectivity
+    model.PointObj.GetCoordCartesian = coords
+    sap = SapEdits(SapConnection(model=model))
+    assert sap.frame_ucs().system.origin == (5, 6, 7)
+    assert origins == ["J1"]
+    assert model.events == []
+
+
+def test_no_table_and_no_joint_reports_required_i_end():
+    model = MissingDatabaseTables()
+    model.selected = [(2, "F1")]
+    with pytest.raises(SapApiError, match="I ucundaki jointi seçin") as caught:
+        SapEdits(SapConnection(model=model)).frame_ucs()
+    assert "SapModel.DatabaseTables: E_NOINTERFACE (0x80004002)" in str(caught.value)
+
+
+def test_no_database_interface_reads_named_systems_through_explicit_ref_args():
+    model = MissingDatabaseTables()
+
+    def name_list(count, names):
+        assert (count, names) == (0, ("",))
+        return 3, ("Global", "Slope", "Grid"), 0
+
+    model.CoordSys.GetNameList = name_list
+    assert SapEdits(SapConnection(model=model)).coordinate_system_names() == ("Slope", "Grid")
+
+
+def test_table_method_no_interface_also_uses_ucs_name_fallback(sap):
+    def fail(*args):
+        raise OSError(-2147467262, "No such interface supported")
+
+    sap.model.DatabaseTables.GetTableForDisplayArray = fail
+    sap.model.CoordSys.GetNameList = lambda *args: (1, ("Grid",), 0)
+    assert sap.coordinate_system_names() == ("Grid",)
+
+
+def test_table_server_fault_is_not_mistaken_for_unsupported_interface(sap):
+    def fail(*args):
+        raise OSError(-2147417851, "The server threw an exception")
+
+    sap.model.DatabaseTables.GetTableForDisplayArray = fail
+    with pytest.raises(SapApiError, match=r"Coordinate Systems.*0x80010105"):
+        sap.coordinate_system_names()
+
+
+def test_unlabeled_com_error_from_selection_property_gets_operation_name():
+    class BadSelect(DemoModel):
+        @property
+        def SelectObj(self):
+            raise OSError(-2147467262, "No such interface supported")
+
+        @SelectObj.setter
+        def SelectObj(self, _value):
+            pass
+
+    sap = SapEdits(SapConnection(model=BadSelect()))
+    with pytest.raises(SapApiError, match=r"SapModel.SelectObj: E_NOINTERFACE \(0x80004002\)"):
+        sap.frame_ucs()
+
+
+def test_read_only_diagnostics_distinguishes_table_access_from_base_connection(sap):
+    report = sap.diagnostics()
+    assert "Bağlantı: Hazır SapModel" in report
+    assert "SelectObj.GetSelected: 2 nesne" in report
+    assert "SapModel.DatabaseTables: erişilebilir" in report
+    assert "SapModel.EditGeneral: erişilebilir (çağrılmadı)" in report
+    assert not sap.model.events
 
 
 def test_frame_reference_is_read_only_and_remains_fixed_after_selection_changes(sap):
@@ -236,8 +327,8 @@ def test_frame_origin_comes_from_frame_37_i_end_not_selected_joint(sap):
         assert name == "33"
         return (*origin, 0)
 
-    def matrix(name, values, globally):
-        assert name == "37" and globally is True
+    def matrix(name, *, IsGlobal):
+        assert name == "37" and IsGlobal is True
         return (0, 1, 0, 0, 0, 1, 1, 0, 0), 0
 
     sap.model.PointObj.GetCoordCartesian = coordinates
@@ -249,6 +340,98 @@ def test_frame_origin_comes_from_frame_37_i_end_not_selected_joint(sap):
         assert ucs.system.origin == origin
         assert translation(ucs.system, (500, 0, 0)).args == (0, 0, 500)
     assert not sap.model.events
+
+
+def test_locked_com_array_does_not_retry_or_invent_frame_axes(sap):
+    calls = []
+
+    def matrix(name, *, IsGlobal):
+        calls.append((name, IsGlobal))
+        raise OSError(-2147352563, "Array is locked")
+
+    sap.model.FrameObj.GetTransformationMatrix = matrix
+    with pytest.raises(SapApiError, match="DISP_E_ARRAYISLOCKED") as caught:
+        sap.frame_ucs()
+    assert is_array_locked(caught.value)
+    assert calls == [("F1", True)]
+    assert not sap.model.events
+
+
+def _vertical_frame_with_failed_matrix(sap, *, curved="No", advanced=False,
+                                       offsets=("0",) * 6, angle=30.0):
+    model = sap.model
+    model.units = 5
+    model.selected = [(1, "33"), (2, "37")]
+    model.frame_joints = {"37": "33"}
+    calls = []
+    origin = (-11885.375, 3429.1864, 0.0)
+    model.PointObj.GetCoordCartesian = lambda joint: (
+        *origin[:2], {"33": 0.0, "34": 3100.0}[joint], 0,
+    )
+
+    def broken_matrix(name, *, IsGlobal):
+        calls.append((name, IsGlobal))
+        raise OSError(-2147467261, "Object reference not set to an instance of an object")
+
+    def display_table(key, fields, *args):
+        if key == "Connectivity - Frame" and len(fields) == 4:
+            assert fields == ("Frame", "JointI", "JointJ", "IsCurved")
+            return fields, 1, fields, 1, ("37", "33", "34", curved), 0
+        if key == "Frame Insertion Point Assignments":
+            assert fields == ("Frame", "JtOffsetXI", "JtOffsetYI", "JtOffsetZI",
+                              "JtOffsetXJ", "JtOffsetYJ", "JtOffsetZJ")
+            return fields, 1, fields, 1, ("37", *offsets), 0
+        return model._display_table(key, fields, *args)
+
+    def local_axes(name, default_angle, default_advanced):
+        assert (name, default_angle, default_advanced) == ("37", 0.0, False)
+        return angle, advanced, 0
+
+    model.FrameObj.GetTransformationMatrix = broken_matrix
+    model.FrameObj.GetLocalAxes = local_axes
+    model.DatabaseTables.GetTableForDisplayArray = display_table
+    return origin, calls
+
+
+def test_invalid_pointer_uses_verified_frame_ij_and_scalar_angle(sap):
+    origin, calls = _vertical_frame_with_failed_matrix(sap)
+    ref = sap.frame_ucs()
+    assert ref.label == "Frame 37 · Local 1/2/3 (I/J + açı)"
+    assert ref.system.origin == origin
+    assert ref.system.global_vector((500, 0, 0)) == (0, 0, 500)
+    assert ref.system.global_vector((0, 1, 0)) == pytest.approx((0.8660254038, 0.5, 0))
+    assert ref.system.global_vector((0, 0, 1)) == pytest.approx((-0.5, 0.8660254038, 0))
+    assert calls == [("37", True)]
+    assert not sap.model.events
+
+
+@pytest.mark.parametrize(("kwargs", "reason"), [
+    ({"advanced": True}, "İleri yerel eksen"),
+    ({"curved": "Yes"}, "düz olduğu doğrulanamadı"),
+    ({"curved": ""}, "düz olduğu doğrulanamadı"),
+    ({"offsets": ("0", "0", "0", "0", "0,5", "0")}, "Joint offsetleri"),
+    ({"offsets": ("0", "0", "0", "0", "", "0")}, "Joint offsetleri"),
+])
+def test_invalid_pointer_refuses_unverified_typical_frame(sap, kwargs, reason):
+    _vertical_frame_with_failed_matrix(sap, **kwargs)
+    with pytest.raises(SapApiError, match=reason) as caught:
+        sap.frame_ucs()
+    assert "0x80004003" in str(caught.value)
+    assert "Çalışma UCS'si değişmedi" in str(caught.value)
+    assert not sap.model.events
+
+
+def test_invalid_pointer_can_use_frame_with_no_insertion_assignment(sap):
+    _vertical_frame_with_failed_matrix(sap, angle=0.0)
+    display_table = sap.model.DatabaseTables.GetTableForDisplayArray
+
+    def absent_insertion(key, *args):
+        if key == "Frame Insertion Point Assignments":
+            return 0, None, 0, None, 0
+        return display_table(key, *args)
+
+    sap.model.DatabaseTables.GetTableForDisplayArray = absent_insertion
+    assert sap.frame_ucs().system.global_vector((0, 1, 0)) == (1, 0, 0)
 
 
 def test_frame_not_found_in_table_does_not_guess_i_end_from_selected_joint(sap):

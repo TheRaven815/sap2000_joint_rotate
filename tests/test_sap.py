@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import sys
+from types import ModuleType, SimpleNamespace
+
 import pytest
 
-from joint_axes.errors import JointNotFoundError, SapApiError
-from joint_axes.sap import SapConnection, is_disconnected
+from joint_axes.errors import JointNotFoundError, SapApiError, SapConnectionError
+from joint_axes.sap import SAP_PROGID, SapConnection, is_disconnected
 
 
 class FakePointObj:
@@ -162,12 +165,82 @@ def test_verify_connection_probes_cached_model_instead_of_assuming_it_is_alive()
     model = CachedModel()
     connection = SapConnection(model=model, sap_object=object())
     connection.verify_connection()
-    with pytest.raises(OSError) as exc:
+    with pytest.raises(SapConnectionError, match="GetModelIsLocked") as exc:
         connection.verify_connection()
     assert is_disconnected(exc.value)
     connection.invalidate()
     assert connection._model is None
     assert connection._sap_object is None
+
+
+def _fake_com_client(monkeypatch, client, interface):
+    comtypes_pkg = ModuleType("comtypes")
+    comtypes_pkg.client = client
+    generated = ModuleType("comtypes.gen")
+    generated.SAP2000v1 = SimpleNamespace(cHelper=interface)
+    monkeypatch.setitem(sys.modules, "comtypes", comtypes_pkg)
+    monkeypatch.setitem(sys.modules, "comtypes.client", client)
+    monkeypatch.setitem(sys.modules, "comtypes.gen", generated)
+
+
+def test_sapmodel_no_interface_tries_typed_helper_without_starting_sap(monkeypatch):
+    class BadSapObject:
+        @property
+        def SapModel(self):
+            raise OSError(-2147467262, "No such interface supported")
+
+    interface = object()
+    model = SimpleNamespace(GetModelIsLocked=lambda: False)
+    typed = SimpleNamespace(GetObject=lambda progid: SimpleNamespace(SapModel=model))
+    typed_calls = []
+
+    def query_interface(requested):
+        typed_calls.append(requested)
+        return typed
+
+    _fake_com_client(monkeypatch, SimpleNamespace(
+        GetActiveObject=lambda progid: BadSapObject(),
+        CreateObject=lambda progid: SimpleNamespace(QueryInterface=query_interface),
+    ), interface)
+    connection = SapConnection()
+    assert connection.connect() is model
+    assert typed_calls == [interface]
+    assert connection.connection_route == f"SAP2000v1.Helper.GetObject({SAP_PROGID})"
+
+
+def test_working_active_object_stays_first_and_is_not_called_as_default_member(monkeypatch):
+    class CallableModel:
+        def __call__(self):
+            pytest.fail("A COM proxy may be callable without being a method")
+
+        def GetModelIsLocked(self):
+            return False
+
+    model = CallableModel()
+    _fake_com_client(monkeypatch, SimpleNamespace(
+        GetActiveObject=lambda progid: SimpleNamespace(SapModel=model),
+        CreateObject=lambda progid: pytest.fail("Unnecessary helper lookup"),
+    ), object())
+    connection = SapConnection()
+    connection.verify_connection()
+    assert connection.model is model
+    assert connection.connection_route == f"GetActiveObject({SAP_PROGID})"
+
+
+def test_no_interface_reports_failed_routes_and_does_not_cache_dynamic_only_model(monkeypatch):
+    def fail(progid):
+        raise OSError(-2147467262, "No such interface supported")
+
+    _fake_com_client(monkeypatch, SimpleNamespace(GetActiveObject=fail, CreateObject=fail), object())
+    monkeypatch.setattr(SapConnection, "_get_dispatched_object", staticmethod(
+        lambda client, progid: SimpleNamespace(SapModel=SimpleNamespace(GetModelIsLocked=lambda: False)),
+    ))
+    connection = SapConnection()
+    with pytest.raises(SapConnectionError, match=r"E_NOINTERFACE .*0x80004002") as caught:
+        connection.connect()
+    assert "SAP2000v1.Helper.GetObject" in str(caught.value)
+    assert "Temel COM erişimi var" in str(caught.value)
+    assert connection.connection_route is None
 
 
 def test_coordinate_reader_stops_after_first_rpc_disconnect():

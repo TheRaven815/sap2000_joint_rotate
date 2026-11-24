@@ -8,7 +8,9 @@ seçim okuma çağrılarında bilinen çağrı biçimlerini sırayla dener.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 from ctypes import byref, c_double, c_long, pointer
+from types import MethodType
 from typing import Any
 
 from .errors import JointNotFoundError, SapApiError, SapConnectionError
@@ -22,6 +24,10 @@ HELPER_PROGIDS = ("SAP2000v1.Helper", "SAP2000.Helper")
 POINT_OBJECT_TYPE = 1
 
 # HRESULT'ler: sunucu yok, RPC çağrısı başarısız veya COM nesnesi ayrılmış.
+E_NOINTERFACE = 0x80004002
+E_POINTER = 0x80004003
+DISP_E_ARRAYISLOCKED = 0x8002000D
+_MISSING_MEMBERS = {0x80020003, 0x80020006}  # DISP_E_MEMBERNOTFOUND / UNKNOWNNAME
 _DISCONNECTED_HRESULTS = {
     0x800706BA,  # RPC_S_SERVER_UNAVAILABLE
     0x800706BE,  # RPC_S_CALL_FAILED
@@ -33,7 +39,7 @@ _DISCONNECTED_HRESULTS = {
 }
 
 
-def is_disconnected(error: BaseException | None) -> bool:
+def _hresults(error: BaseException | None) -> Iterator[int]:
     while error is not None:
         # comtypes.COMError ilk argümanda HRESULT taşır; OSError winerror taşır.
         code = getattr(error, "hresult", getattr(error, "winerror", None))
@@ -42,10 +48,37 @@ def is_disconnected(error: BaseException | None) -> bool:
         if isinstance(code, int):
             if 0 < code <= 0xFFFF:
                 code |= 0x80070000  # HRESULT_FROM_WIN32
-            if (code & 0xFFFFFFFF) in _DISCONNECTED_HRESULTS:
-                return True
+            yield code & 0xFFFFFFFF
         error = error.__cause__ or error.__context__
-    return False
+
+
+def is_disconnected(error: BaseException | None) -> bool:
+    return any(code in _DISCONNECTED_HRESULTS for code in _hresults(error))
+
+
+def is_interface_unavailable(error: BaseException) -> bool:
+    return isinstance(error, AttributeError) or any(
+        code == E_NOINTERFACE or code in _MISSING_MEMBERS for code in _hresults(error)
+    )
+
+
+def is_array_locked(error: BaseException) -> bool:
+    return DISP_E_ARRAYISLOCKED in _hresults(error)
+
+
+def is_invalid_pointer(error: BaseException) -> bool:
+    return E_POINTER in _hresults(error)
+
+
+def describe_com_error(error: BaseException) -> str:
+    result = next(_hresults(error), None)
+    if result == E_NOINTERFACE:
+        return "E_NOINTERFACE (0x80004002): Bu SAP2000 COM arabirimi desteklenmiyor."
+    if result == DISP_E_ARRAYISLOCKED:
+        return "DISP_E_ARRAYISLOCKED (0x8002000D): COM dizi tamponu kilitli; SAP2000 model kilidi değil."
+    if result is not None:
+        return f"HRESULT 0x{result:08X}: {error}"
+    return str(error)
 
 
 def _as_int(value: Any) -> int | None:
@@ -243,16 +276,23 @@ class SapConnection:
         self._model = model
         self._sap_object = sap_object
         self.generation = 0
+        self.connection_route: str | None = "Hazır SapModel" if model is not None else None
 
     def invalidate(self) -> None:
         """Kopmuş COM tutamaçlarını bırak; sonraki kullanıcı işlemi yeniden bağlanabilir."""
         self._model = None
         self._sap_object = None
+        self.connection_route = None
         self.generation += 1
 
     def verify_connection(self) -> None:
         # connect() önbellekten dönebilir; salt okuma ile COM sunucusunu doğrula.
-        if not isinstance(self.connect().GetModelIsLocked(), bool):
+        model = self.connect()
+        try:
+            locked = model.GetModelIsLocked()
+        except Exception as exc:
+            raise SapConnectionError(f"SapModel.GetModelIsLocked: {describe_com_error(exc)}") from exc
+        if not isinstance(locked, bool):
             raise SapConnectionError("SAP2000 modelinden geçerli yanıt alınamadı.")
 
     @property
@@ -274,61 +314,95 @@ class SapConnection:
                 "comtypes paketi bulunamadı. 'pip install -r requirements.txt' çalıştırın."
             ) from exc
 
+        failures: list[str] = []
         last_error: Exception | None = None
-        sap_object = self._sap_object
+        missing_interface = False
 
-        if sap_object is None:
+        def record(route: str, error: Exception) -> None:
+            nonlocal last_error, missing_interface
+            last_error = error
+            missing_interface |= E_NOINTERFACE in _hresults(error)
+            failures.append(f"{route}: {describe_com_error(error)}")
+
+        def attach(route, get_object, *args, cache=True, **kwargs) -> Any:
             try:
-                sap_object = comtypes_client.GetActiveObject(SAP_PROGID)
+                obj = get_object(*args, **kwargs)
             except Exception as exc:
-                last_error = exc
+                record(route, exc)
+                return None
+            try:
+                model = obj.SapModel
+                # Dynamic COM proxies are callable even when they already are a model.
+                if isinstance(model, MethodType):
+                    model = model()
+                if model is None or not callable(getattr(model, "GetModelIsLocked", None)):
+                    raise SapConnectionError("SapModel boş veya gerekli arayüzü sunmuyor.")
+            except Exception as exc:
+                record(f"{route}.SapModel", exc)
+                return None
+            if cache:
+                self._sap_object, self._model = obj, model
+                self.connection_route = route
+            return model
 
-        if sap_object is None:
-            for helper_progid in HELPER_PROGIDS:
-                try:
-                    helper = comtypes_client.CreateObject(helper_progid)
-                except Exception as exc:
-                    last_error = exc
-                    continue
-                for progid in SAP_OBJECT_PROGIDS:
+        if self._sap_object is not None:
+            model = attach("Hazır SapObject", lambda: self._sap_object)
+            if model is not None:
+                return model
+
+        # Önce eski, çalışan yol. SapObject almak tek başına bağlantı başarısı değil.
+        model = attach(f"GetActiveObject({SAP_PROGID})", comtypes_client.GetActiveObject, SAP_PROGID)
+        if model is not None:
+            return model
+        for helper_progid in HELPER_PROGIDS:
+            try:
+                helper = comtypes_client.CreateObject(helper_progid)
+                original_helper = helper
+                if helper_progid == HELPER_PROGIDS[0]:
                     try:
-                        sap_object = helper.GetObject(progid)
-                        break
+                        from comtypes.gen import SAP2000v1
+
+                        helper = helper.QueryInterface(SAP2000v1.cHelper)
                     except Exception as exc:
-                        last_error = exc
-                if sap_object is not None:
-                    break
-
-        if sap_object is None:
+                        record(f"{helper_progid}.QueryInterface(cHelper)", exc)
+                        helper = original_helper
+                get_object = helper.GetObject
+            except Exception as exc:
+                record(f"{helper_progid}.GetObject", exc)
+                continue
             for progid in SAP_OBJECT_PROGIDS:
-                try:
-                    sap_object = comtypes_client.GetActiveObject(progid)
-                    break
-                except Exception as exc:
-                    last_error = exc
+                model = attach(f"{helper_progid}.GetObject({progid})", get_object, progid)
+                if model is not None:
+                    return model
 
-        if sap_object is None:
-            detail = f" Son hata: {last_error}" if last_error else ""
-            raise SapConnectionError(
-                "Aktif SAP2000 örneğine bağlanılamadı. SAP2000'i açın, modeli yükleyin "
-                "ve OAPI erişiminin etkin olduğundan emin olun." + detail
-            )
+        for progid in SAP_OBJECT_PROGIDS[1:]:
+            model = attach(f"GetActiveObject({progid})", comtypes_client.GetActiveObject, progid)
+            if model is not None:
+                return model
 
-        try:
-            model = sap_object.SapModel
-            if callable(model):
-                model = model()
-        except Exception as exc:
-            raise SapConnectionError(
-                f"SAP2000 SapModel nesnesine erişilemedi: {exc}"
-            ) from exc
+        # Late binding handles scalar reads, but not the full CSI ByRef edit API.
+        # Do not cache a dynamic-only model as if it could edit a structure.
+        if missing_interface:
+            model = attach("GetActiveObject(IDispatch)", self._get_dispatched_object,
+                           comtypes_client, SAP_PROGID, cache=False)
+            if model is not None:
+                failures.append("GetActiveObject(IDispatch): Temel COM erişimi var; tipli SAP2000 API arabirimi alınamadı.")
 
-        if model is None:
-            raise SapConnectionError("SAP2000 SapModel nesnesi boş döndü.")
+        hint = ("COM arabirimi alınamadı. SAP2000 ve eklentiyi aynı Windows yetki düzeyinde açın. "
+                "Birden fazla SAP2000 sürümü kuruluysa aktif sürüm ve CSI API kurulumunu kontrol edin.\n\n"
+                if missing_interface else "")
+        raise SapConnectionError(
+            "Aktif SAP2000 modeline bağlanılamadı. SAP2000'i açın ve modeli yükleyin.\n\n"
+            + hint + "\n".join(failures)
+        ) from last_error
 
-        self._sap_object = sap_object
-        self._model = model
-        return model
+    @staticmethod
+    def _get_dispatched_object(client: Any, progid: str) -> Any:
+        """GetBestInterface başka IID isterse temel IDispatch ile salt okuma yolu."""
+        from comtypes.automation import IDispatch
+        from comtypes.client.dynamic import Dispatch
+
+        return Dispatch(client.GetActiveObject(progid, interface=IDispatch))
 
     def get_joint_coordinates(self, name: str) -> JointPoint:
         """Joint koordinatlarını ``PointObj.GetCoordCartesian`` ile okur."""

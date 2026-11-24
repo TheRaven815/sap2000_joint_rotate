@@ -240,6 +240,31 @@ connection failure, or opening a different model. If SAP2000 stops responding,
 reopen SAP2000 and the model, then click **Bağlantıyı test et**. No failed edit is
 automatically repeated; check the model state before retrying.
 
+### COM interface troubleshooting
+
+`E_NOINTERFACE (0x80004002 / -2147467262)` means a COM interface could not be
+obtained, not that the selected frame or joint was invalid. **Bağlantı tanısı**
+in the **Move / Replicate** tab runs read-only checks and can copy the result.
+It separates initial `SapModel` access from selection, database tables,
+frame reference capture, and access to `EditGeneral` without executing an edit.
+If `DatabaseTables` is unavailable, select the frame **and its I-end joint**:
+the tool verifies the joint's frame connectivity before using it. UCS names
+then use `CoordSys.GetNameList` if available. If initial attachment fails on
+every route, run both apps at the same Windows privilege level and verify that
+the CSI API installation matches the running SAP2000 version. The tool does
+not change COM registration.
+
+`DISP_E_ARRAYISLOCKED (0x8002000D)` from `FrameObj.GetTransformationMatrix`
+is a COM array error, not a model lock. The frame matrix call lets SAP2000
+allocate the output instead of passing a preallocated array. Named UCSs use
+the scalar origin and rotation values from `CoordSys.GetCoordSys`.
+If the frame matrix is rejected with a COM array or null-pointer error, the
+tool can reconstruct typical axes from the I/J joint coordinates and
+`FrameObj.GetLocalAxes`. It does so only after confirming the frame is
+straight, has no joint offsets, and does not use advanced local axes.
+The active label shows **I/J + açı** when this path is used. If those checks
+fail, the current working UCS is kept and no axes are guessed.
+
 The tool calls SAP2000's native `EditGeneral` commands on the live selection;
 it does not rebuild objects or manage their assignments one at a time. It uses
 Global for that call and restores SAP2000's previous active coordinate system

@@ -59,6 +59,37 @@ class CoordinateSystem:
         a, b, c, d, e, f, g, h, i = values
         return cls(origin, ((a, b, c), (d, e, f), (g, h, i)))
 
+    @classmethod
+    def from_sap_rotations(cls, origin: Point3, rz: float, ry: float, rx: float) -> CoordinateSystem:
+        """CoordSys.GetCoordSys: sabit global Z, Y, X sırasıyla döndür."""
+        rz, ry, rx = map(math.radians, _finite((rz, ry, rx)))
+        cz, cy, cx = map(math.cos, (rz, ry, rx))
+        sz, sy, sx = map(math.sin, (rz, ry, rx))
+        return cls(origin, (
+            (cy * cz, -cy * sz, sy),
+            (cx * sz + sx * sy * cz, cx * cz - sx * sy * sz, -sx * cy),
+            (sx * sz - cx * sy * cz, sx * cz + cx * sy * sz, cx * cy),
+        ))
+
+    @classmethod
+    def from_straight_frame(cls, start: Point3, end: Point3, angle: float) -> CoordinateSystem:
+        """CSI'nin düz, offsetsiz frame için tipik yerel eksen kuralı."""
+        axis1 = _line_direction(start, end)
+        # CSI considers sin(angle to vertical) < 1e-3 vertical. Its +X
+        # reference is projected onto the plane normal to the frame axis.
+        reference = (1.0, 0.0, 0.0) if math.hypot(*axis1[:2]) < 1e-3 else (0.0, 0.0, 1.0)
+        axis3 = _line_direction(ZERO, _cross(axis1, reference))
+        axis2 = _cross(axis3, axis1)
+        if not math.isfinite(angle):
+            raise InputValidationError("Frame yerel eksen açısı sonlu olmalı.")
+        radians = math.radians(angle % 360.0)
+        c, s = math.cos(radians), math.sin(radians)
+        u, v, w = (
+            (first, second * c + third * s, third * c - second * s)
+            for first, second, third in zip(axis1, axis2, axis3, strict=True)
+        )
+        return cls(start, (u, v, w))
+
     def global_vector(self, local: Point3) -> Point3:
         x, y, z = _finite(local)
         a, b, c = (row[0] * x + row[1] * y + row[2] * z for row in self.matrix)
