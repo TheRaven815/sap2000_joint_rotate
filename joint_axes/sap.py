@@ -21,6 +21,32 @@ HELPER_PROGIDS = ("SAP2000v1.Helper", "SAP2000.Helper")
 # eObjectType: 1 = Point. Seçim listesindeki diğer nesneler yok sayılır.
 POINT_OBJECT_TYPE = 1
 
+# HRESULT'ler: sunucu yok, RPC çağrısı başarısız veya COM nesnesi ayrılmış.
+_DISCONNECTED_HRESULTS = {
+    0x800706BA,  # RPC_S_SERVER_UNAVAILABLE
+    0x800706BE,  # RPC_S_CALL_FAILED
+    0x800706BF,  # RPC_S_CALL_FAILED_DNE
+    0x80010108,  # RPC_E_DISCONNECTED
+    0x80010007,  # RPC_E_SERVER_DIED
+    0x80010012,  # RPC_E_SERVER_DIED_DNE
+    0x800401FD,  # CO_E_OBJNOTCONNECTED
+}
+
+
+def is_disconnected(error: BaseException | None) -> bool:
+    while error is not None:
+        # comtypes.COMError ilk argümanda HRESULT taşır; OSError winerror taşır.
+        code = getattr(error, "hresult", getattr(error, "winerror", None))
+        if code is None and error.args:
+            code = error.args[0]
+        if isinstance(code, int):
+            if 0 < code <= 0xFFFF:
+                code |= 0x80070000  # HRESULT_FROM_WIN32
+            if (code & 0xFFFFFFFF) in _DISCONNECTED_HRESULTS:
+                return True
+        error = error.__cause__ or error.__context__
+    return False
+
 
 def _as_int(value: Any) -> int | None:
     if isinstance(value, bool):
@@ -216,6 +242,18 @@ class SapConnection:
     def __init__(self, model: Any | None = None, sap_object: Any | None = None) -> None:
         self._model = model
         self._sap_object = sap_object
+        self.generation = 0
+
+    def invalidate(self) -> None:
+        """Kopmuş COM tutamaçlarını bırak; sonraki kullanıcı işlemi yeniden bağlanabilir."""
+        self._model = None
+        self._sap_object = None
+        self.generation += 1
+
+    def verify_connection(self) -> None:
+        # connect() önbellekten dönebilir; salt okuma ile COM sunucusunu doğrula.
+        if not isinstance(self.connect().GetModelIsLocked(), bool):
+            raise SapConnectionError("SAP2000 modelinden geçerli yanıt alınamadı.")
 
     @property
     def model(self) -> Any:
@@ -311,6 +349,8 @@ class SapConnection:
             try:
                 ret, values = self._read_xyz_once(method, name, mode)
             except Exception as exc:
+                if is_disconnected(exc):
+                    raise SapApiError(f"PointObj.GetCoordCartesian: {exc}") from exc
                 attempts.append(f"{mode}: {exc}")
                 continue
 
@@ -405,6 +445,8 @@ class SapConnection:
             try:
                 candidates = call()
             except Exception as exc:
+                if is_disconnected(exc):
+                    raise SapApiError(f"PointObj.GetNameList: {exc}") from exc
                 last_error = exc
                 continue
             for candidate in candidates:
@@ -425,7 +467,9 @@ class SapConnection:
 
         try:
             names, types = self._read_selection()
-        except Exception:
+        except Exception as exc:
+            if is_disconnected(exc):
+                raise
             return self._selected_with_point_flags()
 
         if types is not None and len(types) == len(names):
@@ -492,6 +536,8 @@ class SapConnection:
             try:
                 candidates = call()
             except Exception as exc:
+                if is_disconnected(exc):
+                    raise SapApiError(f"SelectObj.GetSelected: {exc}") from exc
                 last_error = exc
                 continue
 
@@ -533,7 +579,9 @@ class SapConnection:
         for name in names:
             try:
                 flag = _bool_from_result(method(name))
-            except Exception:
+            except Exception as exc:
+                if is_disconnected(exc):
+                    raise SapApiError(f"PointObj.GetSelected: {exc}") from exc
                 continue
             if flag is None:
                 continue

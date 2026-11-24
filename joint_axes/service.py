@@ -123,6 +123,6 @@ class JointAxesService:
 
     def test_connection(self) -> None:
         try:
-            self.connection.connect()
+            self.connection.verify_connection()
         except Exception as exc:
             raise SapApiError(str(exc)) from exc

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
-from joint_axes.preview3d import camera_basis, fit_view, orbit_view
+import pytest
+
+from joint_axes.preview3d import Preview3D, camera_basis, fit_view, orbit_view
 
 
 def test_camera_basis_is_orthonormal() -> None:
@@ -45,6 +48,17 @@ def test_yaw_rotates_projection() -> None:
     second = fit_view(points, 400, 200, yaw_deg=90.0)
 
     assert first.project(points[1]) != second.project(points[1])
+
+
+@pytest.mark.parametrize(
+    ("dx", "dy", "yaw", "pitch"),
+    [(20, 0, 27, 24), (-20, 0, 49, 24), (0, 20, 38, 32), (0, -20, 38, 16)],
+)
+def test_preview_drag_reverses_only_horizontal_orbit(dx, dy, yaw, pitch):
+    preview = SimpleNamespace(_yaw=38.0, _pitch=24.0, _drag_origin=(100, 100), _redraw=lambda: None)
+    Preview3D._on_drag(preview, SimpleNamespace(x=100 + dx, y=100 + dy))
+    assert (preview._yaw, preview._pitch) == pytest.approx((yaw, pitch))
+    assert preview._drag_origin == (100 + dx, 100 + dy)
 
 
 def test_orbit_view_keeps_scale_while_rotating() -> None:

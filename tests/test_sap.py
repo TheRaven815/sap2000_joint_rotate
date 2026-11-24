@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from joint_axes.errors import JointNotFoundError, SapApiError
-from joint_axes.sap import SapConnection
+from joint_axes.sap import SapConnection, is_disconnected
 
 
 class FakePointObj:
@@ -147,6 +147,42 @@ def test_reads_coordinates_from_comtypes_return_list() -> None:
     point = connection.get_joint_coordinates("2")
 
     assert (point.x, point.y, point.z) == (1.0, 1.0, 0.0)
+
+
+def test_verify_connection_probes_cached_model_instead_of_assuming_it_is_alive():
+    class CachedModel:
+        calls = 0
+
+        def GetModelIsLocked(self):
+            self.calls += 1
+            if self.calls > 1:
+                raise OSError(-2147023170, "Remote procedure call failed")
+            return True  # A locked but responsive model is still connected.
+
+    model = CachedModel()
+    connection = SapConnection(model=model, sap_object=object())
+    connection.verify_connection()
+    with pytest.raises(OSError) as exc:
+        connection.verify_connection()
+    assert is_disconnected(exc.value)
+    connection.invalidate()
+    assert connection._model is None
+    assert connection._sap_object is None
+
+
+def test_coordinate_reader_stops_after_first_rpc_disconnect():
+    model = ReturningModel()
+    calls = []
+
+    def disconnected(*args):
+        calls.append(args)
+        raise OSError(-2147023170, "Remote procedure call failed")
+
+    model.PointObj.GetCoordCartesian = disconnected
+    with pytest.raises(SapApiError) as exc:
+        SapConnection(model=model).get_joint_coordinates("1")
+    assert is_disconnected(exc.value)
+    assert calls == [("1",)]
 
 
 def test_missing_joint_raises_joint_not_found() -> None:

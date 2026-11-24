@@ -11,9 +11,9 @@ The default mode evaluates the geometry in the XY plane. The **3D orientation**
 option makes the other local axes follow the vertical slope when the joint
 line changes elevation.
 
-The tool does not create or modify geometry. It only reads joint coordinates
-from the active SAP2000 model and writes local-axis rotation angles through the
-SAP2000 OAPI.
+The **Joint Axes** tab only reads joint coordinates and writes local-axis
+rotation angles. The separate **Move / Replicate** tab uses the SAP2000 OAPI to
+move and copy selected model objects in a fixed working coordinate system (UCS).
 
 ## Contents
 
@@ -24,6 +24,7 @@ SAP2000 OAPI.
 - [Running from source](#running-from-source)
 - [Standalone Windows executable](#standalone-windows-executable)
 - [Quick start](#quick-start)
+- [Move / Replicate](#move--replicate)
 - [Interface reference](#interface-reference)
 - [Manual update check](#manual-update-check)
 - [Algorithm](#algorithm)
@@ -38,6 +39,8 @@ SAP2000 OAPI.
 ## Key features
 
 - Bulk update of joint local axes through the SAP2000 OAPI.
+- Move and Linear, Radial, and Mirror replication relative to Global, a named
+  UCS, or a selected frame's local axes.
 - 2D XY-plane mode and 3D orientation mode for lines with changing Z elevation.
 - Automatic outward-normal selection using curvature voting.
 - Manual direction reversal for straight lines, S-shaped lines, and ambiguous
@@ -204,6 +207,47 @@ virtual environment exists. The application icon is loaded from
    after the operation.
 
 Preview is read-only. Nothing is written to SAP2000 until **Uygula** is pressed.
+
+## Move / Replicate
+
+1. Open **Move / Replicate**. It starts in **Global**. To use a profile, select
+   exactly one frame in SAP2000 and click **Seçili profilden al**. Local 1/2/3
+   become X/Y/Z, and the frame's I-end becomes the origin. To use a saved UCS,
+   click **UCS listesini yenile** and select its name. **SAP2000 aktif UCS'yi al**
+   captures the coordinate system currently active in SAP2000.
+   The profile's I-end and the UCS list are read from SAP2000's display tables
+   (SAP2000 v23 or newer). Selecting joints alongside one frame is allowed;
+   those joints do not define the frame origin.
+2. Select the objects to edit in SAP2000. The captured UCS stays fixed in the
+   tool until explicitly changed, even if the reference frame moves or you
+   switch tabs. Capturing a reference does not write anything to the model.
+3. Choose **Move** or **Linear** for local ΔX/ΔY/ΔZ, **Radial** for a local
+   axis/3D line and angular increments, or **Mirror** for a local plane.
+   Length inputs use SAP2000's current units; angles use degrees. You can fill
+   point fields or derive a delta by selecting individual joints in SAP2000.
+   Reselect the target objects afterward.
+4. **Önizle** shows the exact global parameters and selection count without
+   writing to SAP2000. Click **Taşı** or **Kopyala** and confirm to execute.
+   Original objects are kept for replication unless **Orijinal nesneleri sil**
+   is explicitly checked and confirmed.
+
+**SAP2000'de etkinleştir** is optional. It activates the captured named UCS
+in SAP2000. For a profile, it asks for a new UCS name and adds a coordinate
+system definition; it does not overwrite an existing one. Move/Replicate does
+not require adding this definition. A captured UCS is session-only in the tool;
+select it again after restarting the tool, reconnecting to SAP2000 after a
+connection failure, or opening a different model. If SAP2000 stops responding,
+reopen SAP2000 and the model, then click **Bağlantıyı test et**. No failed edit is
+automatically repeated; check the model state before retrying.
+
+The tool calls SAP2000's native `EditGeneral` commands on the live selection;
+it does not rebuild objects or manage their assignments one at a time. It uses
+Global for that call and restores SAP2000's previous active coordinate system
+afterward. Assignment/load replication and connectivity/merging follow SAP2000's
+native behavior. The API documented for this integration does not expose the
+**Modify/Show Replicate Options** dialog's per-assignment checkboxes. Check the
+results on a copy of the model before using them in a production model, especially
+for connected joints, restraints, loads, and local-axis assignments.
 
 ## Interface reference
 
@@ -435,7 +479,15 @@ python -m ruff check .
 
 The tests do not require SAP2000. A fake OAPI model is used to verify coordinate
 reading, selection reading, local-axis assignment, view refresh, geometry,
-ordering, preview, theme, and update-check behavior.
+ordering, preview, theme, and update-check behavior. UCS tests verify the
+row-major SAP2000 matrix convention, origin handling, native edit arguments,
+and restoration of the prior coordinate system on both success and failure.
+
+For a live SAP2000 check, use a disposable model with a skew frame, known
+section/load/restraint assignments, and a non-Global active UCS. Verify a local
+X move, each replication type, retention of originals and assignments, and
+restoration of the SAP2000 active UCS. Repeat after changing the target
+selection; the tool's working UCS should remain unchanged.
 
 ## Project structure
 
@@ -447,6 +499,7 @@ joint_axes/
   assets/          # app.ico and tiger.png
   __init__.py      # package version
   __main__.py      # python -m joint_axes entry point
+  edit_ui.py       # Move / Replicate tab
   errors.py        # application error types
   geometry.py      # tangent, normal, outward direction, angles
   info.py          # About window and manual update check UI
@@ -456,7 +509,9 @@ joint_axes/
   ordering.py      # nearest-neighbor and 2-opt line ordering
   preview3d.py     # 3D canvas projection and drawing
   sap.py           # SAP2000 OAPI connection and adapter
+  sap_edits.py     # UCS reading and native geometry edit calls
   service.py       # preview and apply workflow
+  transform.py     # UCS vectors, points and edit arguments
   ui.py            # Tkinter user interface
   updates.py       # GitHub Releases update check
   window_theme.py  # Windows title-bar theming
@@ -530,5 +585,5 @@ again and overwrites them.
 - SAP2000 does not guarantee the order of joints returned from a selection.
 - The outward side cannot be determined automatically for a perfectly straight
   line or a tied curvature vote. Use **Yönü ters çevir** in those cases.
-- The tool updates joint local axes only. Frame, shell, and other object local
-  axes are outside its scope.
+- **Joint Axes** does not write frame, shell, or other object local-axis
+  assignments. The **Move / Replicate** tab can read frame axes as a reference.

@@ -5,14 +5,18 @@ from __future__ import annotations
 import re
 import sys
 import tkinter as tk
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+from .edit_ui import EditTab
 from .info import InfoWindow
 from .inputs import split_joint_tokens
 from .meta import APP_NAME, APP_VERSION
 from .models import AxisPlan, JointAxisResult, Vector2
 from .preview3d import Preview3D
+from .sap import is_disconnected
+from .sap_edits import SapEdits
 from .service import ApplyReport, JointAxesService
 from .window_theme import apply_title_bar_theme
 
@@ -251,23 +255,40 @@ class JointAxesWindow(ttk.Frame):
 
     def _bind_shortcuts(self) -> None:
         root = self.winfo_toplevel()
-        root.bind("<Control-i>", lambda _event: self._load_selection(), add="+")
-        root.bind("<Control-I>", lambda _event: self._load_selection(), add="+")
-        root.bind("<F5>", lambda _event: self._load_all_joints(), add="+")
+        root.bind("<Control-i>", lambda _event: self._joint_shortcut(self._load_selection), add="+")
+        root.bind("<Control-I>", lambda _event: self._joint_shortcut(self._load_selection), add="+")
+        root.bind("<F5>", lambda _event: self._joint_shortcut(self._load_all_joints), add="+")
+
+    def _joint_shortcut(self, action: Callable[[], None]) -> None:
+        if self.workspace.select() == str(self.axes_tab):
+            action()
 
     # ------------------------------------------------------------------ layout
 
     def _build_layout(self) -> None:
         self.pack(fill="both", expand=True)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=3)
-        self.rowconfigure(4, weight=2)
+        self.rowconfigure(1, weight=1)
 
         self._build_header()
+        self.workspace = ttk.Notebook(self)
+        self.workspace.grid(row=1, column=0, sticky="nsew")
+        self.workspace.enable_traversal()
+        self.axes_tab = ttk.Frame(self.workspace, padding=8, style="App.TFrame")
+        self.axes_tab.columnconfigure(0, weight=1)
+        self.axes_tab.rowconfigure(1, weight=3)
+        self.axes_tab.rowconfigure(4, weight=2)
+        self.workspace.add(self.axes_tab, text="Joint Axes")
         self._build_body()
         self._build_options()
         self._build_results()
         self._build_status()
+        self.edit_tab = EditTab(
+            self.workspace, SapEdits(self.service.connection),
+            lambda: self.conn_var.set("SAP2000 · bağlı"),
+            self._mark_disconnected,
+        )
+        self.workspace.add(self.edit_tab, text="Move / Replicate")
 
     def _build_header(self) -> None:
         header = ttk.Frame(self, style="App.TFrame")
@@ -282,7 +303,7 @@ class JointAxesWindow(ttk.Frame):
         )
         ttk.Label(
             brand,
-            text="SAP2000 · 2B/3B normal hizalama",
+            text="SAP2000 · Yerel eksen araçları",
             style="Muted.TLabel",
         ).pack(side="left", padx=(8, 0), pady=(3, 0))
 
@@ -314,7 +335,7 @@ class JointAxesWindow(ttk.Frame):
         self.theme_button.pack(side="left", padx=(6, 0))
 
     def _build_body(self) -> None:
-        body = ttk.Frame(self, style="App.TFrame")
+        body = ttk.Frame(self.axes_tab, style="App.TFrame")
         body.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
         body.columnconfigure(0, weight=0, minsize=382)
         body.columnconfigure(1, weight=1)
@@ -527,7 +548,7 @@ class JointAxesWindow(ttk.Frame):
         self.preview3d.grid(row=2, column=0, sticky="nsew")
 
     def _build_options(self) -> None:
-        options = ttk.Frame(self, style="App.TFrame")
+        options = ttk.Frame(self.axes_tab, style="App.TFrame")
         options.grid(row=2, column=0, sticky="ew", pady=(0, 6))
 
         ttk.Checkbutton(
@@ -570,14 +591,14 @@ class JointAxesWindow(ttk.Frame):
         self.preview_button.pack(side="right", padx=(0, 6))
 
     def _build_results(self) -> None:
-        result_head = ttk.Frame(self, style="App.TFrame")
+        result_head = ttk.Frame(self.axes_tab, style="App.TFrame")
         result_head.grid(row=3, column=0, sticky="ew", pady=(2, 4))
         ttk.Label(result_head, text="Sonuç", style="Section.TLabel").pack(side="left")
         ttk.Label(result_head, textvariable=self.count_var, style="Muted.TLabel").pack(
             side="left", padx=(6, 0)
         )
 
-        tree_frame = ttk.Frame(self, style="App.TFrame")
+        tree_frame = ttk.Frame(self.axes_tab, style="App.TFrame")
         tree_frame.grid(row=4, column=0, sticky="nsew")
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
@@ -680,7 +701,7 @@ class JointAxesWindow(ttk.Frame):
 
     def _build_status(self) -> None:
         self.status_label = ttk.Label(
-            self,
+            self.axes_tab,
             textvariable=self.status_var,
             style="Muted.TLabel",
             justify="left",
@@ -1071,6 +1092,19 @@ class JointAxesWindow(ttk.Frame):
         style.configure("TFrame", background=bg)
         style.configure("Panel.TFrame", background=panel)
         style.configure("TLabel", background=bg, foreground=theme["text"])
+        style.configure("TNotebook", background=bg, bordercolor=theme["border"],
+                        lightcolor=theme["border"], darkcolor=theme["border"])
+        style.configure("TNotebook.Tab", padding=(12, 6), background=theme["heading_bg"],
+                        foreground=theme["text"], focuscolor=theme["accent"])
+        style.map("TNotebook.Tab", background=[("selected", bg), ("active", theme["button_hover"])],
+                  foreground=[("selected", theme["accent"])])
+        style.configure("TLabelframe", background=bg, bordercolor=theme["border"],
+                        lightcolor=theme["border"], darkcolor=theme["border"])
+        style.configure("TLabelframe.Label", background=bg, foreground=theme["text"])
+        style.configure("TEntry", fieldbackground=theme["input_bg"], foreground=theme["text"],
+                        insertcolor=theme["text"], bordercolor=theme["button_border"], padding=(6, 4))
+        style.map("TEntry", fieldbackground=[("disabled", theme["heading_bg"])],
+                  foreground=[("disabled", theme["muted"])], bordercolor=[("focus", theme["accent"])])
         style.configure(
             "Title.TLabel",
             background=bg,
@@ -1408,16 +1442,22 @@ class JointAxesWindow(ttk.Frame):
 
     def _test_connection(self) -> None:
         connected = False
+        on_axes_tab = self.workspace.select() == str(self.axes_tab)
         self._set_busy(True)
         try:
             self.service.test_connection()
-            try:
-                self._store_catalog(self.service.get_joint_names())
-            except Exception:
-                pass
+            if on_axes_tab:
+                try:
+                    self._store_catalog(self.service.get_joint_names())
+                except Exception as exc:
+                    if is_disconnected(exc):
+                        raise
         except Exception as exc:
-            self.conn_var.set("SAP2000 · bağlantı yok")
-            messagebox.showerror("SAP2000 bağlantı hatası", str(exc), parent=self)
+            self._mark_disconnected()
+            detail = str(exc)
+            if is_disconnected(exc):
+                detail += "\n\nSAP2000'i ve modeli açtıktan sonra bağlantıyı yeniden test edin."
+            messagebox.showerror("SAP2000 bağlantı hatası", detail, parent=self)
         else:
             self.conn_var.set("SAP2000 · bağlı")
             self._update_entry_hint()
@@ -1426,6 +1466,10 @@ class JointAxesWindow(ttk.Frame):
         finally:
             self._set_busy(False)
 
+        if not on_axes_tab:
+            if connected:
+                self.edit_tab.status.set("SAP2000 bağlantısı kuruldu.")
+            return
         if connected and not self.joint_names:
             self._load_selection(silent_empty=True)
         elif connected:
@@ -1433,6 +1477,14 @@ class JointAxesWindow(ttk.Frame):
                 "SAP2000 bağlantısı kuruldu · mevcut liste korundu, "
                 "seçimi yenilemek için Ctrl+I."
             )
+
+    def _mark_disconnected(self) -> None:
+        self.service.connection.invalidate()
+        self.conn_var.set("SAP2000 · bağlantı yok")
+        self._catalog.clear()
+        self._catalog_loaded = False
+        self.joint_entry.configure(values=())
+        self._update_entry_hint()
 
     def _calculate_plan(self) -> AxisPlan:
         if not self.joint_names:
@@ -1651,8 +1703,12 @@ def main() -> None:
     root.update_idletasks()
     app._sync_title_bar()
     if "--smoke-test" in sys.argv:
-        root.withdraw()
-        app.update_idletasks()
+        app.workspace.select(app.edit_tab)
+        for operation in app.edit_tab.operations.tabs():
+            app.edit_tab.operations.select(operation)
+            root.update()
+        app._apply_theme("dark")
+        root.update()
         root.destroy()
         return
     root.mainloop()

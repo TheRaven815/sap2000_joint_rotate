@@ -240,7 +240,7 @@ class Preview3D(tk.Canvas):
         if self._drag_origin is None:
             return
         last_x, last_y = self._drag_origin
-        self._yaw = (self._yaw + (event.x - last_x) * 0.55) % 360.0
+        self._yaw = (self._yaw - (event.x - last_x) * 0.55) % 360.0
         self._pitch = max(-80.0, min(80.0, self._pitch + (event.y - last_y) * 0.4))
         self._drag_origin = (event.x, event.y)
         self._redraw()
